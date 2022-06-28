@@ -22,8 +22,8 @@ namespace bench {
 namespace {
 
 constexpr std::size_t kClients = 128;
-constexpr std::size_t kQperClient = 100;
-constexpr std::size_t kStateSize = 6400;
+constexpr std::size_t kQperClient = 1000;
+constexpr std::size_t kStateSize = 640;
 constexpr std::size_t kMod = 1'000'007;
 
 struct State {
