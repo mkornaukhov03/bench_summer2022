@@ -2,18 +2,14 @@
 
 Apple M1, 16 RAM
 TODO: generate a chart
----------------------------------------------------------------------------------
-Benchmark                                       Time             CPU   Iterations
----------------------------------------------------------------------------------
-bench::BM_yaclib_collatz                     3612 ns         3612 ns       192330
-bench::BM_folly_collatz                      2.15 ns         2.15 ns    325776861
-bench::BM_cppcoro_collatz                     925 ns          925 ns       751847
-bench::BM_yaclib_reschedule/real_time        5986 ns         1856 ns       115544
-bench::BM_folly_reschedule/real_time         2.16 ns         2.16 ns    328135768
-bench::BM_cppcoro_reschedule/real_time      42519 ns         2828 ns        16555
-bench::BM_yaclib_mutex/real_time         46066305 ns        15062 ns           16
-bench::BM_folly_mutex/real_time              2.15 ns         2.15 ns    328148841
-bench::BM_cppcoro_mutex/real_time        31810346 ns        30550 ns           20
-bench::BM_yaclib_latch/real_time            29471 ns        18061 ns        23591
-bench::BM_folly_latch/real_time              2.12 ns         2.12 ns    327936948
-bench::BM_cppcoro_latch/real_time           49603 ns        18077 ns        10788
+-------------------------------------------------------------------------------------------------
+Benchmark                                                       Time             CPU   Iterations
+-------------------------------------------------------------------------------------------------
+bench::BM_cppcoro_reschedule/iterations:1000/real_time      54439 ns         6789 ns         1000
+bench::BM_yaclib_reschedule/iterations:1000/real_time       12377 ns         2601 ns         1000
+bench::BM_cppcoro_collatz/27/real_time                      11704 ns        11704 ns        58773
+bench::BM_yaclib_collatz/27/real_time                       59541 ns        59530 ns        11806
+bench::BM_cppcoro_mutex/real_time                       555413458 ns       200000 ns            1
+bench::BM_yaclib_mutex/real_time                        181482604 ns       129750 ns            4
+bench::BM_cppcoro_latch/600/real_time                      687294 ns       302060 ns         1000
+bench::BM_yaclib_latch/600/real_time                      1021829 ns       848656 ns          622
