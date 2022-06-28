@@ -1,108 +1,120 @@
+#include <cppcoro/async_latch.hpp>
+#include <cppcoro/static_thread_pool.hpp>
+#include <cppcoro/sync_wait.hpp>
+#include <cppcoro/task.hpp>
+#include <cppcoro/when_all.hpp>
+
+#include <yaclib/algo/wait.hpp>
+#include <yaclib/coroutine/await_group.hpp>
+#include <yaclib/coroutine/future_traits.hpp>
+#include <yaclib/coroutine/on.hpp>
+#include <yaclib/executor/inline.hpp>
+#include <yaclib/executor/thread_pool.hpp>
+
+#include <benchmark/benchmark.h>
+
 #include <array>
 #include <cassert>
 #include <iostream>
 #include <tuple>
 #include <utility>
 
-#include <benchmark/benchmark.h>
-
-#include <yaclib/algo/wait.hpp>
-#include <yaclib/coroutine/async_mutex.hpp>
-#include <yaclib/coroutine/await.hpp>
-#include <yaclib/coroutine/await_group.hpp>
-#include <yaclib/coroutine/future_traits.hpp>
-#include <yaclib/coroutine/on.hpp>
-#include <yaclib/coroutine/oneshot_event.hpp>
-#include <yaclib/executor/inline.hpp>
-#include <yaclib/executor/thread_pool.hpp>
-
-#include <folly/Portability.h>
-
-#include <folly/executors/InlineExecutor.h>
-#include <folly/experimental/coro/BlockingWait.h>
-#include <folly/experimental/coro/CurrentExecutor.h>
-#include <folly/experimental/coro/Task.h>
-#include <folly/experimental/coro/ViaIfAsync.h>
-
-#include <cppcoro/async_latch.hpp>
-#include <cppcoro/async_mutex.hpp>
-#include <cppcoro/inline_scheduler.hpp>
-#include <cppcoro/resume_on.hpp>
-#include <cppcoro/schedule_on.hpp>
-#include <cppcoro/static_thread_pool.hpp>
-#include <cppcoro/sync_wait.hpp>
-#include <cppcoro/task.hpp>
-#include <cppcoro/when_all.hpp>
-
-#include "benchmark_decls.hpp"
-namespace {
-constexpr int kFutures = 20;
-}
 namespace bench {
+namespace {
 
-yaclib::Future<void> yaclib_latch(yaclib::IExecutor &tp,
-                                  yaclib::AwaitGroup &ag) {
-  co_await On(tp);
-  ag.Done();
-  co_await ag;
-}
-
-folly::coro::Task<void> folly_latch() {
-  //  co_await folly::coro::co_mutex_on_current_executor; // TODO
-  co_return;
-}
-
-cppcoro::task<void> cppcoro_latch(cppcoro::static_thread_pool &tp,
-                                  cppcoro::async_latch &latch) {
+cppcoro::task<void> cppcoro_done(cppcoro::static_thread_pool &tp,
+                                 cppcoro::async_latch &wg) {
   co_await tp.schedule();
-  latch.count_down();
-  co_await latch;
+  wg.count_down();
+}
+
+cppcoro::task<void> cppcoro_await(cppcoro::static_thread_pool &tp,
+                                  cppcoro::async_latch &wg) {
+  co_await tp.schedule();
+  co_await wg;
+}
+
+yaclib::Future<void> yaclib_done(yaclib::IExecutor &tp,
+                                 yaclib::AwaitGroup &wg) {
+  co_await On(tp);
+  wg.Done();
+}
+
+yaclib::Future<void> yaclib_await(yaclib::IExecutor &tp,
+                                  yaclib::AwaitGroup &wg) {
+  co_await On(tp);
+  co_await wg;
+}
+
+} // namespace
+
+void BM_cppcoro_latch(benchmark::State &state) {
+  const std::size_t tasks_count = state.range(0);
+  cppcoro::static_thread_pool tp{std::thread::hardware_concurrency()};
+  for (auto _ : state) {
+    cppcoro::async_latch wg{static_cast<ptrdiff_t>(tasks_count)};
+    auto all = [&]() -> cppcoro::task<void> {
+      std::vector<cppcoro::task<void>> tasks;
+      tasks.reserve(tasks_count * 2);
+      for (std::size_t i = 0; i < tasks_count * 2; ++i) {
+        if (i % 2 == 0) {
+          tasks.push_back(cppcoro_await(tp, wg));
+        } else {
+          tasks.push_back(cppcoro_done(tp, wg));
+        }
+      }
+      co_await cppcoro::when_all_ready(std::move(tasks));
+    };
+    cppcoro::sync_wait(all());
+  }
 }
 
 void BM_yaclib_latch(benchmark::State &state) {
-  // Perform setup here
-  auto tp = yaclib::MakeThreadPool();
-  yaclib::AwaitGroup ag;
+  const std::size_t tasks_count = state.range(0);
+  auto tp = yaclib::MakeThreadPool(std::thread::hardware_concurrency());
   for (auto _ : state) {
-    ag.Reset();
-    auto foo = [&]() -> yaclib::Future<void> {
-      std::vector<yaclib::Future<void>> arr(kFutures);
-      ag.Add(kFutures);
-      for (int i = 0; i < kFutures; ++i) {
-        arr[i] = yaclib_latch(*tp, ag);
+    yaclib::AwaitGroup wg;
+    wg.Add(tasks_count);
+    auto all = [&]() -> yaclib::Future<void> {
+      for (std::size_t i = 0; i < tasks_count * 2; ++i) {
+        if (i % 2 == 0) {
+          yaclib_await(*tp, wg).Detach();
+        } else {
+          yaclib_done(*tp, wg).Detach();
+        }
       }
-      co_await ag;
+      co_await wg;
     };
-    std::ignore = foo().Get();
+    std::ignore = all().Get();
   }
   tp->HardStop();
   tp->Wait();
 }
 
-void BM_folly_latch(benchmark::State &state) {
-  // Perform setup here
+/*
+void BM_yaclib_latch2(benchmark::State &state) {
+  const std::size_t tasks_count = state.range(0);
+  auto tp = yaclib::MakeThreadPool(std::thread::hardware_concurrency());
   for (auto _ : state) {
-    // This code gets timed
-    // folly_mutex().scheduleOn(&folly::InlineExecutor::instance()).start().get();
-  }
-}
-
-void BM_cppcoro_latch(benchmark::State &state) {
-  // Perform setup here
-  cppcoro::static_thread_pool tp{};
-  cppcoro::async_latch m{kFutures};
-  std::array<cppcoro::task<void>, kFutures> arr;
-
-  for (auto _ : state) {
-    auto foo = [&]() -> cppcoro::task<void> {
-      std::vector<cppcoro::task<void>> arr(kFutures);
-      for (int i = 0; i < kFutures; ++i) {
-        arr[i] = cppcoro_latch(tp, m);
+    yaclib::AwaitGroup wg;
+    wg.Add(tasks_count);
+    auto all = [&]() -> yaclib::Future<void> {
+      std::vector<yaclib::Future<void>> tasks;
+      tasks.reserve(tasks_count * 2);
+      for (std::size_t i = 0; i < tasks_count * 2; ++i) {
+        if (i % 2 == 0) {
+          tasks.push_back(yaclib_await(*tp, wg));
+        } else {
+          tasks.push_back(yaclib_done(*tp, wg));
+        }
       }
-      co_await cppcoro::when_all(std::move(arr));
+      co_await Await(tasks.begin(), tasks.end());
     };
-    cppcoro::sync_wait(foo());
+    std::ignore = all().Get();
   }
+  tp->HardStop();
+  tp->Wait();
 }
+*/
 
 } // namespace bench

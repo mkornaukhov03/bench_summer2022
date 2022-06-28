@@ -1,10 +1,8 @@
-#include <array>
-#include <cassert>
-#include <iostream>
-#include <tuple>
-#include <utility>
-
-#include <benchmark/benchmark.h>
+#include <cppcoro/async_mutex.hpp>
+#include <cppcoro/static_thread_pool.hpp>
+#include <cppcoro/sync_wait.hpp>
+#include <cppcoro/task.hpp>
+#include <cppcoro/when_all.hpp>
 
 #include <yaclib/algo/wait.hpp>
 #include <yaclib/coroutine/async_mutex.hpp>
@@ -14,144 +12,99 @@
 #include <yaclib/executor/inline.hpp>
 #include <yaclib/executor/thread_pool.hpp>
 
-#include <folly/Portability.h>
+#include <benchmark/benchmark.h>
 
-#include <folly/executors/InlineExecutor.h>
-#include <folly/experimental/coro/BlockingWait.h>
-#include <folly/experimental/coro/CurrentExecutor.h>
-#include <folly/experimental/coro/Mutex.h>
-#include <folly/experimental/coro/Task.h>
-#include <folly/experimental/coro/ViaIfAsync.h>
+#include <array>
+#include <cassert>
+#include <tuple>
 
-#include <cppcoro/async_mutex.hpp>
-#include <cppcoro/inline_scheduler.hpp>
-#include <cppcoro/resume_on.hpp>
-#include <cppcoro/schedule_on.hpp>
-#include <cppcoro/static_thread_pool.hpp>
-#include <cppcoro/sync_wait.hpp>
-#include <cppcoro/task.hpp>
-#include <cppcoro/when_all.hpp>
-
-#include "benchmark_decls.hpp"
-
+namespace bench {
 namespace {
-constexpr int kClients = 16;
-constexpr int kQperClient = 5000;
-constexpr int kStateSize = 64;
-constexpr int kMod = 1'000'007;
 
-static std::size_t id = 0;
+constexpr std::size_t kClients = 128;
+constexpr std::size_t kQperClient = 100;
+constexpr std::size_t kStateSize = 6400;
+constexpr std::size_t kMod = 1'000'007;
 
 struct State {
-  int state[kStateSize]{};
-  void reset() {
-    for (int i = 0; i < kStateSize; ++i) {
-      state[i] = 0;
-    }
+  static std::size_t get_next(std::size_t x) noexcept {
+    return (x * x + 1) % kMod;
   }
-  void accept(int local) {
-    for (int i = 0; i < kStateSize; ++i) {
-      state[i] ^= local;
+
+  void accept(std::size_t local) noexcept {
+    for (std::size_t &i : state) {
+      i ^= local;
       local = get_next(local);
     }
   }
-  static int get_next(int x) { return (x * x + 1) % kMod; }
+
+  std::array<std::size_t, kStateSize> state;
 };
 
-State s;
-
-} // namespace
-
-namespace bench {
-
 yaclib::Future<void> yaclib_mutex(yaclib::IExecutor &tp,
-                                  yaclib::AsyncMutex<false> &m) {
+                                  yaclib::AsyncMutex<false> &m,
+                                  std::size_t &shared_id) {
   co_await On(tp);
-  State s;
-  for (int i = 0; i < kQperClient; ++i) {
+  State state{};
+  for (std::size_t i = 0; i < kQperClient; ++i) {
     co_await m.Lock();
-    std::size_t local_id = id;
-    id = State::get_next(id);
-    co_await m.UnlockOn(tp);
-    s.accept(local_id);
+    const auto old_id = shared_id;
+    shared_id = State::get_next(shared_id);
+    co_await m.Unlock();
+    state.accept(old_id);
   }
-}
-
-folly::coro::Task<void> folly_mutex(folly::coro::Mutex &m) {
-#if 0 
-  for (int i = 0; i < kQperClient; ++i) {
-    co_await m.co_lock();
-    s.accept();
-    m.unlock();
-  }
-#endif
-  co_return;
 }
 
 cppcoro::task<void> cppcoro_mutex(cppcoro::static_thread_pool &tp,
-                                  cppcoro::async_mutex &m) {
+                                  cppcoro::async_mutex &m,
+                                  std::size_t &shared_id) {
   co_await tp.schedule();
-  State s;
-  for (int i = 0; i < kQperClient; ++i) {
+  State state{};
+  for (std::size_t i = 0; i < kQperClient; ++i) {
     co_await m.lock_async();
-    std::size_t local_id = id;
-    id = State::get_next(id);
+    const auto old_id = shared_id;
+    shared_id = State::get_next(shared_id);
     m.unlock();
-    s.accept(local_id);
+    state.accept(old_id);
+  }
+}
+
+} // namespace
+
+void BM_cppcoro_mutex(benchmark::State &state) {
+  cppcoro::static_thread_pool tp{std::thread::hardware_concurrency()};
+  cppcoro::async_mutex m;
+  std::size_t shared_id = 0;
+  for (auto _ : state) {
+    auto all = [&]() -> cppcoro::task<void> {
+      std::vector<cppcoro::task<void>> tasks;
+      tasks.reserve(kClients);
+      for (std::size_t i = 0; i < kClients; ++i) {
+        tasks.push_back(cppcoro_mutex(tp, m, shared_id));
+      }
+      co_await cppcoro::when_all_ready(std::move(tasks));
+    };
+    cppcoro::sync_wait(all());
   }
 }
 
 void BM_yaclib_mutex(benchmark::State &state) {
-  // Perform setup here
-  auto tp = yaclib::MakeThreadPool();
+  auto tp = yaclib::MakeThreadPool(std::thread::hardware_concurrency());
   yaclib::AsyncMutex<false> m;
-  s.reset();
+  std::size_t shared_id = 0;
   for (auto _ : state) {
-    auto foo = [&]() -> yaclib::Future<void> {
-      std::vector<yaclib::Future<void>> arr(kClients);
-      for (int i = 0; i < kClients; ++i) {
-        arr[i] = yaclib_mutex(*tp, m);
+    auto all = [&]() -> yaclib::Future<void> {
+      std::vector<yaclib::Future<void>> tasks;
+      tasks.reserve(kClients);
+      for (std::size_t i = 0; i < kClients; ++i) {
+        tasks.push_back(yaclib_mutex(*tp, m, shared_id));
       }
-      co_await Await(arr.begin(), arr.end());
+      co_await Await(tasks.begin(), tasks.end());
     };
-    std::ignore = foo().Get();
+    std::ignore = all().Get();
   }
   tp->HardStop();
   tp->Wait();
-}
-
-void BM_folly_mutex(benchmark::State &state) {
-  // Perform setup here
-
-  for (auto _ : state) {
-    // This code gets timed
-#if 0
-  auto foo = [&]()-> folly::coro::Task<void>  {
-      std::vector<folly::coro::Task<void>> arr(kClients);
-      for (int i = 0; i < kClients; ++i) {
-        arr[i] = co_await co_ViaIfAsync(tp, folly_mutex(m));
-      }
-      co_await Wait(arr.begin(), arr.end());
-  };
-#endif
-  }
-}
-
-void BM_cppcoro_mutex(benchmark::State &state) {
-  // Perform setup here
-  cppcoro::static_thread_pool tp{};
-  cppcoro::async_mutex m;
-  s.reset();
-  for (auto _ : state) {
-    auto foo = [&]() -> cppcoro::task<void> {
-      std::vector<cppcoro::task<void>> arr(kClients);
-      for (int i = 0; i < kClients; ++i) {
-        arr[i] = cppcoro_mutex(tp, m);
-      }
-      co_await cppcoro::when_all(std::move(arr));
-    };
-    cppcoro::sync_wait(foo());
-  }
 }
 
 } // namespace bench
