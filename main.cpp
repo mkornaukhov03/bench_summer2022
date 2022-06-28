@@ -19,22 +19,30 @@
 #include "benchmark_decls.hpp"
 
 namespace {
-const int RESCHEDULE_ITERATIONS = 40'000;
+const int RESCHEDULE_ITERATIONS = 1'000;
 const int MUTEX_ITERATIONS = 20;
-}
+const int LATCH_ITERATIONS = 20;
+} // namespace
 
 // Register the function as a benchmark
+
 BENCHMARK(bench::BM_yaclib_collatz);
 BENCHMARK(bench::BM_folly_collatz);
 BENCHMARK(bench::BM_cppcoro_collatz);
 
-BENCHMARK(bench::BM_yaclib_reschedule)->Iterations(RESCHEDULE_ITERATIONS);
-BENCHMARK(bench::BM_folly_reschedule)->Iterations(RESCHEDULE_ITERATIONS);
-BENCHMARK(bench::BM_cppcoro_reschedule)->Iterations(RESCHEDULE_ITERATIONS);
+BENCHMARK(bench::BM_yaclib_reschedule)
+    ->UseRealTime();
+BENCHMARK(bench::BM_folly_reschedule)
+    ->UseRealTime();
+BENCHMARK(bench::BM_cppcoro_reschedule)
+    ->UseRealTime();
 
-BENCHMARK(bench::BM_yaclib_mutex)->Iterations(MUTEX_ITERATIONS);
-BENCHMARK(bench::BM_folly_mutex)->Iterations(MUTEX_ITERATIONS);
-BENCHMARK(bench::BM_cppcoro_mutex)->Iterations(MUTEX_ITERATIONS);
+BENCHMARK(bench::BM_yaclib_mutex)->UseRealTime();
+BENCHMARK(bench::BM_folly_mutex)->UseRealTime();
+BENCHMARK(bench::BM_cppcoro_mutex)->UseRealTime();
+BENCHMARK(bench::BM_yaclib_latch)->UseRealTime();
+BENCHMARK(bench::BM_folly_latch)->UseRealTime();
+BENCHMARK(bench::BM_cppcoro_latch)->UseRealTime();
 
 // Run the benchmark
 BENCHMARK_MAIN();

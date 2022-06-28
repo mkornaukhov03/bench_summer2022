@@ -64,6 +64,7 @@ set (SOURCES main.cpp
   collatz.cpp
   reschedule.cpp
   mutex.cpp
+  latch.cpp
 )
 set (HEADERS benchmark_decls.hpp)
 

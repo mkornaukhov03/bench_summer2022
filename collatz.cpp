@@ -32,10 +32,12 @@ yaclib::Future<void> yaclib_collatz(int x) {
   if (x <= 1)
     co_return;
   if (x % 2 == 0) {
-    std::ignore = yaclib_collatz(x / 2);
+    auto foo = yaclib_collatz(x / 2);
+    co_await Await(foo);
     co_return;
   }
-  std::ignore = yaclib_collatz(3 * x + 1);
+  auto foo = yaclib_collatz(3 * x + 1);
+  co_await Await(foo);
   co_return;
 }
 
