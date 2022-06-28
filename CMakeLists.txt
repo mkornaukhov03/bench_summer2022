@@ -45,7 +45,7 @@ FetchContent_MakeAvailable(cppcoro)
 set(YACLIB_FLAGS CORO)
 FetchContent_Declare(yaclib
   GIT_REPOSITORY https://github.com/YACLib/YACLib.git
-  GIT_TAG main
+  GIT_TAG add-task2-rebase
   )
 FetchContent_MakeAvailable(yaclib)
 
