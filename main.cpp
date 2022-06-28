@@ -1,48 +1,29 @@
-#include <cassert>
-#include <iostream>
-#include <tuple>
-#include <utility>
-
-#include <benchmark/benchmark.h>
-
-#include <yaclib/coroutine/future_traits.hpp>
-
-#include <folly/Portability.h>
-
-#include <folly/executors/InlineExecutor.h>
-#include <folly/experimental/coro/BlockingWait.h>
-#include <folly/experimental/coro/Task.h>
-
-#include <cppcoro/sync_wait.hpp>
-#include <cppcoro/task.hpp>
-
 #include "benchmark_decls.hpp"
 
-namespace {
-const int RESCHEDULE_ITERATIONS = 1'000;
-const int MUTEX_ITERATIONS = 20;
-const int LATCH_ITERATIONS = 20;
-} // namespace
+BENCHMARK(bench::BM_cppcoro_reschedule)->Iterations(1000)->UseRealTime();
+BENCHMARK(bench::BM_yaclib_reschedule)->Iterations(1000)->UseRealTime();
 
-// Register the function as a benchmark
+BENCHMARK(bench::BM_cppcoro_collatz)
+    ->UseRealTime()
+    ->ArgsProduct({{1, 2, 3, 6, 7, 9, 18, 25, 27}});
+BENCHMARK(bench::BM_yaclib_collatz)
+    ->UseRealTime()
+    ->ArgsProduct({{1, 2, 3, 6, 7, 9, 18, 25, 27}});
 
-BENCHMARK(bench::BM_yaclib_collatz);
-BENCHMARK(bench::BM_folly_collatz);
-BENCHMARK(bench::BM_cppcoro_collatz);
-
-BENCHMARK(bench::BM_yaclib_reschedule)
-    ->UseRealTime();
-BENCHMARK(bench::BM_folly_reschedule)
-    ->UseRealTime();
-BENCHMARK(bench::BM_cppcoro_reschedule)
-    ->UseRealTime();
-
-BENCHMARK(bench::BM_yaclib_mutex)->UseRealTime();
-BENCHMARK(bench::BM_folly_mutex)->UseRealTime();
 BENCHMARK(bench::BM_cppcoro_mutex)->UseRealTime();
-BENCHMARK(bench::BM_yaclib_latch)->UseRealTime();
-BENCHMARK(bench::BM_folly_latch)->UseRealTime();
-BENCHMARK(bench::BM_cppcoro_latch)->UseRealTime();
+BENCHMARK(bench::BM_yaclib_mutex)->UseRealTime();
+
+BENCHMARK(bench::BM_cppcoro_latch)
+    ->UseRealTime()
+    ->ArgsProduct({{1, 5, 10, 50, 100, 500}});
+BENCHMARK(bench::BM_yaclib_latch)
+    ->UseRealTime()
+    ->ArgsProduct({{1, 5, 10, 50, 100, 500}});
+/*
+BENCHMARK(bench::BM_yaclib_latch2)
+    ->UseRealTime()
+    ->ArgsProduct({{1, 5, 10, 50, 100, 500}});
+*/
 
 // Run the benchmark
 BENCHMARK_MAIN();
